@@ -1,0 +1,5 @@
+datasets/jdner
+.DS_Store
+outputs/
+prev_trained_model/
+__pycache__/
