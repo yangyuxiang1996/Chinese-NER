@@ -244,8 +244,8 @@ def load_model(model, model_path):
     if os.path.isdir(model_path):
         model_path = os.path.join(model_path, 'pytorch_model.bin')
     logging.info(f"loading model from {str(model_path)} .")
-    states = torch.load(model_path)
-    state = states['state_dict']
+    state = torch.load(model_path)
+    # state = state['state_dict']
     if isinstance(model, nn.DataParallel):
         model.module.load_state_dict(state)
     else:

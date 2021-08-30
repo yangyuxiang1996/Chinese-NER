@@ -4,7 +4,7 @@
 Author: Yuxiang Yang
 Date: 2021-08-19 00:32:07
 LastEditors: Yuxiang Yang
-LastEditTime: 2021-08-30 16:31:10
+LastEditTime: 2021-08-30 17:09:27
 FilePath: /Chinese-NER/models/bilstm_for_ner.py
 Description: 
 '''
@@ -45,6 +45,7 @@ class BiLSTMForNer(nn.Module):
         self.classifier = nn.Linear(args.hidden_size * 2, args.num_labels)
         self.use_crf = args.use_crf
         self.loss_type = args.loss_type
+        self.num_labels = args.num_labels
         if args.use_crf:
             self.crf = CRF(num_tags=args.num_labels, batch_first=True)
 

@@ -1,9 +1,20 @@
+#!/usr/bin/env python
+# coding=utf-8
+'''
+Author: Yuxiang Yang
+Date: 2021-08-30 12:17:27
+LastEditors: Yuxiang Yang
+LastEditTime: 2021-08-30 17:18:18
+FilePath: /Chinese-NER/run.py
+Description: 
+'''
 import glob
 import logging
 import os
 import json
 import time
 from datetime import timedelta
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, TensorDataset
@@ -294,14 +305,17 @@ def evaluate(args, model, tokenizer, prefix=""):
                 inputs["token_type_ids"] = (batch[2] if args.model_type in ["bert", "xlnet"] else None)
             outputs = model(**inputs)
             tmp_eval_loss, logits = outputs[:2]
-            tags = model.crf.decode(logits, inputs['attention_mask'])
+            if args.use_crf:
+                preds = model.crf.decode(logits, inputs['attention_mask'])
+                preds = preds.squeeze(0).cpu().numpy().tolist()
+            else:
+                preds = np.argmax(logits.cpu().numpy(), axis=2).tolist()
         if args.n_gpu > 1:
             tmp_eval_loss = tmp_eval_loss.mean()  # mean() to average on multi-gpu parallel evaluating
         eval_loss += tmp_eval_loss.item()
         nb_eval_steps += 1
         out_label_ids = inputs['labels'].cpu().numpy().tolist()
         input_lens = inputs['input_lens'].cpu().numpy().tolist()
-        tags = tags.squeeze(0).cpu().numpy().tolist()
         for i, label in enumerate(out_label_ids):
             temp_1 = []
             temp_2 = []
@@ -313,7 +327,7 @@ def evaluate(args, model, tokenizer, prefix=""):
                     break
                 else:
                     temp_1.append(args.id2label[out_label_ids[i][j]])
-                    temp_2.append(args.id2label[tags[i][j]])
+                    temp_2.append(args.id2label[preds[i][j]])
         pbar(step)
     logger.info("\n")
     eval_loss = eval_loss / nb_eval_steps
@@ -359,8 +373,11 @@ def predict(args, model, tokenizer, prefix=""):
                 inputs["token_type_ids"] = (batch[2] if args.model_type in ["bert", "xlnet"] else None)
             outputs = model(**inputs)
             logits = outputs[0]
-            tags = model.crf.decode(logits, inputs['attention_mask'])
-            tags  = tags.squeeze(0).cpu().numpy().tolist()
+            if args.use_crf:
+                tags = model.crf.decode(logits, inputs['attention_mask'])
+                tags  = tags.squeeze(0).cpu().numpy().tolist()
+            else:
+                tags = np.argmax(logits.cpu().numpy(), axis=2).tolist()
         preds = tags[0][1:-1]  # [CLS]XXXX[SEP]
         label_entities = get_entities(preds, args.id2label, args.markup)
         json_d = {}
