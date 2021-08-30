@@ -3,9 +3,9 @@
 '''
 Author: yangyuxiang
 Date: 2021-07-07 17:19:02
-LastEditors: yangyuxiang
-LastEditTime: 2021-07-22 10:45:04
-FilePath: /Chinese-Product-Search/models/bert_for_ner.py
+LastEditors: Yuxiang Yang
+LastEditTime: 2021-08-30 16:27:24
+FilePath: /Chinese-NER/models/bert_for_ner.py
 Description:
 '''
 import torch
@@ -70,9 +70,20 @@ class BertCrfForNer(BertPreTrainedModel):
         super(BertCrfForNer, self).__init__(config)
         self.num_labels = config.num_labels
         self.bert = BertModel(config)
+        if config.use_lstm:
+            self.bilstm = nn.LSTM(input_size=config.hidden_size,
+                                  hidden_size=config.hidden_size // 2,
+                                  num_layers=1,
+                                  batch_first=True,
+                                  bidirectional=True)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.classifier = nn.Linear(config.hidden_size, config.num_labels)
-        self.crf = CRF(num_tags=config.num_labels, batch_first=True)
+        self.use_crf = config.use_crf
+        self.use_lstm = config.use_lstm
+        self.loss_type = config.loss_type
+
+        if config.use_crf:
+            self.crf = CRF(num_tags=config.num_labels, batch_first=True)
         self.init_weights()
 
     def forward(self, input_ids,
@@ -84,13 +95,34 @@ class BertCrfForNer(BertPreTrainedModel):
                 input_lens=None):
         outputs = self.bert(input_ids=input_ids, token_type_ids=token_type_ids,
                             position_ids=position_ids, head_mask=head_mask, attention_mask=attention_mask)
-        last_hidden_state = outputs[0]
+        last_hidden_state = outputs[0]  # (batch_size, sequence_length, hidden_size)
+        if self.use_lstm:
+            last_hidden_state, _ = self.bilstm(last_hidden_state)
         sequence_output = self.dropout(last_hidden_state)
+        print(sequence_output.shape)  # (batch_size, sequence_length, hidden_size)
         logits = self.classifier(sequence_output)  # (batch_size, seq_length, num_labels)
         outputs = (logits,) + outputs
         if labels is not None:
-            loss = self.crf(emissions = logits, tags=labels, mask=attention_mask)
-            outputs =(-1*loss,)+outputs
+            if self.use_crf:
+                loss = self.crf(emissions = logits, tags=labels, mask=attention_mask)
+                outputs =(-1*loss,)+outputs
+            else:
+                assert self.loss_type in ['ce', 'fl', 'lsc']
+                if self.loss_type == 'ce':
+                    loss_fct = CrossEntropyLoss(ignore_index=0)
+                elif self.loss_type == 'fl':
+                    loss_fct = FocalLoss(ignore_index=0)
+                elif self.loss_type == 'lsc':
+                    loss_fct = LabelSmoothingCrossEntropy(ignore_index=0)
+                
+                if attention_mask is not None:
+                    active_loss = attention_mask.contiguous().view(-1) == 1
+                    active_logits = logits.contiguous().view(-1, self.num_labels)[active_loss]
+                    active_targets = labels.contiguous().view(-1)[active_loss]
+                    loss = loss_fct(active_logits, active_targets)
+                else:
+                    loss = loss_fct(logits.contiguous().view(-1, self.num_labels), labels.contiguous().view(-1))
+                outputs = (loss,) + outputs
         return outputs
             
 

@@ -65,10 +65,11 @@ def collate_fn(batch):
     all_labels = all_labels[:,:max_len]
     return all_input_ids, all_attention_mask, all_token_type_ids, all_labels, all_lens
 
-def convert_examples_to_features(examples,label_list,max_seq_length,tokenizer,
-                                 cls_token_at_end=False,cls_token="[CLS]",cls_token_segment_id=1,
-                                 sep_token="[SEP]",pad_on_left=False,pad_token=0,pad_token_segment_id=0,
-                                 sequence_a_segment_id=0,mask_padding_with_zero=True,):
+
+def convert_examples_to_features_for_bert(examples, label_list, max_seq_length, tokenizer,
+                                          cls_token_at_end=False, cls_token="[CLS]", cls_token_segment_id=1,
+                                          sep_token="[SEP]", pad_on_left=False, pad_token=0, pad_token_segment_id=0,
+                                          sequence_a_segment_id=0, mask_padding_with_zero=True,):
     """ Loads a data file into a list of `InputBatch`s
         `cls_token_at_end` define the location of the CLS token:
             - False (Default, BERT/XLM pattern): [CLS] + A + [SEP] + B + [SEP]
@@ -324,8 +325,52 @@ class JDnerProcessor(DataProcessor):
             examples.append(InputExample(guid=guid, text_a=text_a, labels=labels))
         return examples
 
+class WBnerProcessor(DataProcessor):
+    """Processor for the chinese ner data set."""
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(self._read_text(os.path.join(data_dir, "train.txt")), "train")
+
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(self._read_text(os.path.join(data_dir, "valid.txt")), "dev")
+
+    def get_test_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(self._read_text(os.path.join(data_dir, "test.txt")), "test")
+
+    def get_labels(self):
+        """See base class."""
+        # TODO: 根据实际数据进行修改
+        return ["X", "B-BRAND", "I-BRAND", "B-HARD", "I-HARD", "B-PRICE", 
+                "I-PRICE", "B-OUTLOOK", "I-OUTLOOK", "B-SYS", "I-SYS",
+                "B-FUNC", "I-FUNC", "B-TYPE", "I-TYPE", "B-SCENE", "I-SCENE",
+                "O"]
+
+    def _create_examples(self, lines, set_type):
+        """Creates examples for the training and dev sets."""
+        examples = []
+        for (i, line) in enumerate(lines):
+            # if i == 0:
+            #     continue
+            guid = "%s-%s" % (set_type, i)
+            text_a= line['words']
+            # BIOS
+            labels = []
+            for x in line['labels']:
+                if 'M-' in x:
+                    labels.append(x.replace('M-','I-'))
+                elif 'E-' in x:
+                    labels.append(x.replace('E-', 'I-'))
+                else:
+                    labels.append(x)
+            examples.append(InputExample(guid=guid, text_a=text_a, labels=labels))
+        return examples
+
 ner_processors = {
     "cner": CnerProcessor,
     "cluener":CluenerProcessor,
-    "jdner":JDnerProcessor
+    "jdner":JDnerProcessor,
+    "wbner":WBnerProcessor,
 }
