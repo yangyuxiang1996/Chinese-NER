@@ -1,4 +1,5 @@
-datasets/jdner
+datasets/jdner/cached*
+datasets/jdner/*json*.txt
 .DS_Store
 outputs/
 prev_trained_model/

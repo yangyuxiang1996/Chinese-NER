@@ -1,8 +1,19 @@
-import torch
+#!/usr/bin/env python
+# coding=utf-8
+'''
+Author: Yuxiang Yang
+Date: 2021-08-19 00:32:07
+LastEditors: Yuxiang Yang
+LastEditTime: 2021-08-30 16:31:10
+FilePath: /Chinese-NER/models/bilstm_for_ner.py
+Description: 
+'''
 import torch.nn as nn
 from torch.nn import LayerNorm
 from .layers.crf import CRF
-from .transformers.modeling_bert import BertModel
+from torch.nn import CrossEntropyLoss
+from losses.focal_loss import FocalLoss
+from losses.label_smoothing import LabelSmoothingCrossEntropy
 
 class SpatialDropout(nn.Dropout2d):
     def __init__(self, p=0.6):
@@ -22,11 +33,7 @@ class BiLSTMForNer(nn.Module):
         super(BiLSTMForNer, self).__init__()
         self.embedding_size = args.embedding_size
         self.model_type = args.model_type
-        if args.model_type == 'bert_bilstm_crf':
-            assert args.model_name_or_path != ""
-            self.embedding = BertModel.from_pretrained(args.model_name_or_path)
-        else:
-            self.embedding = nn.Embedding(args.vocab_size, args.embedding_size)
+        self.embedding = nn.Embedding(args.vocab_size, args.embedding_size)
         self.bilstm = nn.LSTM(input_size=args.embedding_size,
                               hidden_size=args.hidden_size,
                               num_layers=2,
@@ -35,23 +42,41 @@ class BiLSTMForNer(nn.Module):
                               bidirectional=True)
         self.dropout = SpatialDropout(args.drop_p)
         self.layer_norm = LayerNorm(args.hidden_size * 2)
-        self.classifier = nn.Linear(args.hidden_size*2, args.num_labels)
-        self.crf = CRF(num_tags=args.num_labels, batch_first=True)
+        self.classifier = nn.Linear(args.hidden_size * 2, args.num_labels)
+        self.use_crf = args.use_crf
+        self.loss_type = args.loss_type
+        if args.use_crf:
+            self.crf = CRF(num_tags=args.num_labels, batch_first=True)
 
-    def forward(self, input_ids, attention_mask, labels, token_type_ids=None):
-        if self.model_type == 'bert_bilstm_crf':
-            embs = self.embedding(input_ids)[0]
-        else:
-            embs = self.embedding(input_ids)
+    def forward(self, input_ids, attention_mask, labels, token_type_ids=None, input_lens=None):
+        embs = self.embedding(input_ids)
         embs = self.dropout(embs)
         embs = embs * attention_mask.float().unsqueeze(2)
-        seqence_output, _ = self.bilstm(embs)
-        seqence_output= self.layer_norm(seqence_output)
-        logits = self.classifier(seqence_output)
+        sequence_output, _ = self.bilstm(embs)
+        sequence_output= self.layer_norm(sequence_output)
+        logits = self.classifier(sequence_output)
         outputs = (logits,)
         if labels is not None:
-            loss = self.crf(emissions = logits, tags=labels, mask=attention_mask)
-            outputs =(-1*loss,)+outputs
+            if self.use_crf:
+                loss = self.crf(emissions=logits, tags=labels, mask=attention_mask)
+                outputs =(-1*loss,)+outputs
+            else:
+                assert self.loss_type in ['ce', 'fl', 'lsc']
+                if self.loss_type == 'ce':
+                    loss_fct = CrossEntropyLoss(ignore_index=0)
+                elif self.loss_type == 'fl':
+                    loss_fct = FocalLoss(ignore_index=0)
+                elif self.loss_type == 'lsc':
+                    loss_fct = LabelSmoothingCrossEntropy(ignore_index=0)
+                
+                if attention_mask is not None:
+                    active_loss = attention_mask.contiguous().view(-1) == 1
+                    active_logits = logits.contiguous().view(-1, self.num_labels)[active_loss]
+                    active_targets = labels.contiguous().view(-1)[active_loss]
+                    loss = loss_fct(active_logits, active_targets)
+                else:
+                    loss = loss_fct(logits.contiguous().view(-1, self.num_labels), labels.contiguous().view(-1))
+                outputs = (loss,) + outputs
         return outputs # (loss), scores
 
 
